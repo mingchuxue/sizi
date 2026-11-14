@@ -9,6 +9,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="motion.css">
 <script>try{const t=JSON.parse(localStorage.getItem('sizi.set')||'{}').theme;if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.dataset.theme='dark'}catch(e){}</script>
 </head>
 <body>
@@ -23,6 +24,7 @@
 <main id="main"></main>
 <div class="modal" id="modal" hidden><div class="mbg" data-close></div><div class="mcard" id="mcard"></div></div>
 <div class="toast" id="toast"></div>
+<script src="motion.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -134,3 +134,50 @@ main{max-width:620px;margin:0 auto;padding:18px 16px 60px}
 .pips{display:flex;gap:6px;justify-content:center;margin-top:4px}
 .pips i{width:22px;height:5px;border-radius:9px;background:var(--line)}
 .row.cur .tile.typing{border-style:solid;border-color:var(--ink3);background:var(--tile)}
+
+/* —— 切换与反馈动效 —— */
+html,body{transition:background-color .3s,color .3s}
+#tabs>.mo-ind{background:var(--ink)}
+#tabs.mo-g button.on{background:transparent}
+.tabs button{transition:color .25s,transform .15s}
+.mcard .seg>.mo-ind{background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.12);border-radius:8px}
+.mcard .seg.mo-g button.on{background:transparent;box-shadow:none}
+.seg button{transition:color .2s}
+.tabs button:active,.tb:active:not(:disabled),.go:active:not(:disabled),.ib:active,.btn:active,.bi:active,.seg button:active{transform:scale(.95)}
+.tb,.go,.ib,.btn{transition:transform .15s var(--mo-ease),background-color .2s,border-color .2s,opacity .2s}
+.bi{transition:transform .22s var(--mo-ease),border-color .2s,box-shadow .22s}
+@media (hover:hover){.bi:hover{transform:translateY(-2px);box-shadow:var(--shadow)}.ib:hover,.tb:hover:not(:disabled){transform:translateY(-1px)}}
+/* 翻牌：翻到一半才露出颜色 */
+.tile{transition:border-color .2s,background-color .2s}
+.tile.flip{animation:sz-flip .56s var(--mo-ease) both}
+.tile.flip .ch,.tile.flip .py,.tile.flip .py *{animation:sz-flipc .56s both;animation-delay:inherit}
+@keyframes sz-flip{0%{transform:perspective(400px) rotateX(0);background-color:var(--tile);border-color:var(--tileb)}
+ 49.9%{transform:perspective(400px) rotateX(90deg);background-color:var(--tile);border-color:var(--tileb)}
+ 50%{transform:perspective(400px) rotateX(90deg)}100%{transform:perspective(400px) rotateX(0)}}
+@keyframes sz-flipc{0%,49.9%{color:var(--ink)}}
+.tile.pop{animation:sz-pop .16s var(--mo-ease)}
+@keyframes sz-pop{50%{transform:scale(1.08)}}
+.row.cur .tile.typing{transition:border-color .15s,background-color .15s}
+.row.shake .tile{border-color:#d9534f}
+.win .row:last-child .tile{animation:sz-jump .55s var(--mo-ease) both}
+.win .row:last-child .tile:nth-child(2){animation-delay:.08s}
+.win .row:last-child .tile:nth-child(3){animation-delay:.16s}
+.win .row:last-child .tile:nth-child(4){animation-delay:.24s}
+@keyframes sz-jump{30%{transform:translateY(-14px) scale(1.04)}60%{transform:translateY(2px)}100%{transform:none}}
+.board:has(.flip)~.result{animation-delay:.75s;animation-fill-mode:both}
+.result{animation:up .45s var(--mo-ease)}
+.result .rw{animation:sz-rw .6s var(--mo-spring) backwards;animation-delay:inherit}
+@keyframes sz-rw{from{opacity:0;letter-spacing:24px}}
+.pips i{transition:background-color .3s,transform .3s}
+.sugg:not([hidden]){animation:sz-drop .18s var(--mo-ease);transform-origin:bottom center}
+@keyframes sz-drop{from{opacity:0;transform:translateY(6px) scale(.98)}}
+.hint.mo-in{animation:mo-in .3s var(--mo-ease)}
+.mbg{animation:mo-fade-in .22s ease}
+.mcard{animation:mo-pop-in .3s var(--mo-spring)}
+.modal.mo-keep .mcard,.modal.mo-keep .mbg{animation:none}
+.modal.mo-out .mbg{animation:mo-fade-out .17s ease forwards}
+.modal.mo-out .mcard{animation:mo-pop-out .17s ease forwards}
+.dist em{animation:sz-wipe .6s var(--mo-ease) backwards}
+.dist div:nth-child(2) em{animation-delay:.04s}.dist div:nth-child(3) em{animation-delay:.08s}.dist div:nth-child(4) em{animation-delay:.12s}.dist div:nth-child(5) em{animation-delay:.16s}.dist div:nth-child(6) em{animation-delay:.2s}.dist div:nth-child(7) em{animation-delay:.24s}.dist div:nth-child(8) em{animation-delay:.28s}.dist div:nth-child(9) em{animation-delay:.32s}.dist div:nth-child(10) em{animation-delay:.36s}
+@keyframes sz-wipe{from{clip-path:inset(0 100% 0 0)}}
+.toast{transition:opacity .22s,transform .3s var(--mo-spring)}

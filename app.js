@@ -59,8 +59,8 @@ function score(guess, ans) {
 /* ui */
 let toastT;
 const toast = (m, ms = 1700) => { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); };
-const modal = h => { $('#mcard').innerHTML = `<button class="x" data-close aria-label="关闭">×</button>${h}`; $('#modal').hidden = false; };
-const closeM = () => { $('#modal').hidden = true; };
+const modal = h => { const m = $('#modal'); Motion.open(m); m.classList.toggle('mo-keep', !m.hidden); $('#mcard').innerHTML = `<button class="x" data-close aria-label="关闭">×</button>${h}`; $('#modal').hidden = false; };
+const closeM = () => { Motion.close($('#modal'), () => { $('#modal').hidden = true; }); };
 $('#modal').addEventListener('click', e => { if (e.target.closest('[data-close]')) closeM(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeM(); });
 
@@ -108,7 +108,7 @@ function render(anim) {
   const dt = new Date();
   main.innerHTML = `
     <div class="meta"><span>${MODE === 'daily' ? `第 <b>${d + 1}</b> 期 · ${dt.getMonth() + 1}月${dt.getDate()}日` : `自由练习 · ${SET.tier === 'hard' ? '进阶词库' : '常用词库'}`}</span><span class="pill">第 ${Math.min(cur.guesses.length + (cur.done ? 0 : 1), MAX)} / ${MAX} 次</span></div>
-    <div class="board ${cur.won && anim === 'win' ? 'win' : ''}" id="board">${rows.join('')}</div>
+    <div class="board" id="board">${rows.join('')}</div>
     ${cur.done ? '' : `
     <div class="inbox"><div class="sugg" id="sugg" hidden></div>
       <div class="inrow"><input id="inp" placeholder="成语 或 拼音首字母" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button class="go" id="go">猜</button></div></div>
@@ -116,7 +116,7 @@ function render(anim) {
     ${hintHTML()}
     ${keysHTML()}`}
     ${cur.done ? resultHTML() : ''}`;
-  if (anim === 'win') setTimeout(() => $('#board')?.classList.remove('win'), 900);
+  if (anim === 'win') { const bd = $('#board'); setTimeout(() => bd.classList.add('win'), Motion.reduced ? 0 : 900); setTimeout(() => bd.classList.remove('win'), 1900); }
   bind();
 }
 function hintHTML() {
@@ -171,7 +171,7 @@ function bind() {
     sg.innerHTML = items.map((w, i) => `<button data-w="${w}"><b>${w}</b><span>${esc(pinyinOf(w))}</span></button>`).join('');
     $$('button', sg).forEach(b => b.onmousedown = e => { e.preventDefault(); inp.value = b.dataset.w; sg.hidden = true; submit(); });
   };
-  const preview = () => { const cs = [...inp.value.replace(/[^\u4e00-\u9fff]/g, '')].slice(0, 4); $$('#curRow .tile').forEach((t, i) => { t.querySelector('.ch').textContent = cs[i] || ''; t.classList.toggle('typing', !!cs[i]); }); };
+  const preview = () => { const cs = [...inp.value.replace(/[^\u4e00-\u9fff]/g, '')].slice(0, 4); $$('#curRow .tile').forEach((t, i) => { const ch = t.querySelector('.ch'); if (cs[i] && ch.textContent !== cs[i]) Motion.pulse(t, 'pop'); ch.textContent = cs[i] || ''; t.classList.toggle('typing', !!cs[i]); }); };
   inp.addEventListener('input', () => { showS(); preview(); });
   inp.addEventListener('blur', () => setTimeout(() => sg.hidden = true, 150));
   inp.addEventListener('keydown', e => {
@@ -180,11 +180,11 @@ function bind() {
     else if (e.key === 'Enter') { e.preventDefault(); if (sel >= 0 && items[sel]) inp.value = items[sel]; sg.hidden = true; submit(); }
   });
   $('#go').onclick = submit;
-  $('#hE').onclick = () => { cur.hints.e = 1; ST.hintsUsed++; sv('sizi.stats', ST); saveGame(); render(); };
+  $('#hE').onclick = () => { cur.hints.e = 1; ST.hintsUsed++; sv('sizi.stats', ST); saveGame(); render(); Motion.enter($('.hint')); };
   $('#hC').onclick = () => {
     const known = new Set(); cur.guesses.forEach(g => [...g].forEach((c, i) => { if (cur.ans[i] === c) known.add(i); }));
     const opts = [0, 1, 2, 3].filter(i => !known.has(i)); if (!opts.length) return toast('每个字都已经猜到了');
-    cur.hints.c = opts[Math.floor(Math.random() * opts.length)]; ST.hintsUsed++; sv('sizi.stats', ST); saveGame(); render();
+    cur.hints.c = opts[Math.floor(Math.random() * opts.length)]; ST.hintsUsed++; sv('sizi.stats', ST); saveGame(); render(); Motion.enter($('.hint'));
   };
   if ($('#giveup')) $('#giveup').onclick = () => { if (confirm('确定揭晓答案吗？本题会记为未猜中。')) finish(false); };
   if (matchMedia('(pointer:fine)').matches) inp.focus();
@@ -251,7 +251,8 @@ function stats() {
   <div class="sgrid"><div><b>${ST.played}</b><span>参与</span></div><div><b>${pct}</b><span>胜率 %</span></div><div><b>${ST.streak}</b><span>连胜</span></div><div><b>${ST.best}</b><span>最长连胜</span></div></div>
   <h3 style="font-size:15px">猜中所用次数</h3>
   <div class="dist">${Array.from({ length: MAX }, (_, i) => i + 1).map(i => { const v = ST.dist[i] || 0; const cw = MODE === 'daily' && DAILY.won && DAILY.guesses.length === i; return `<div><i>${i}</i><em class="${cw ? 'cur' : ''}" style="width:${Math.max(7, v / max * 100)}%">${v}</em></div>`; }).join('')}</div>
-  <p style="font-size:13px;color:var(--ink3);margin-top:18px">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 成语集 ${Object.keys(ST.book).length} 个</p>`);
+  <p style="font-size:13px;color:var(--ink3);margin-top:18px" class="sfree">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 成语集 ${Object.keys(ST.book).length} 个</p>`);
+  Motion.countUp($('#mcard'), '.sgrid b', 600);
 }
 function settings() {
   const seg = (k, opts) => `<div class="seg" data-k="${k}">${opts.map(([v, t]) => `<button data-v="${v}" class="${String(SET[k]) === String(v) ? 'on' : ''}">${t}</button>`).join('')}</div>`;
@@ -266,7 +267,7 @@ function settings() {
   $('#reset').onclick = () => { if (confirm('确定清除全部记录？')) { ['sizi.stats', 'sizi.daily', 'sizi.free'].forEach(k => localStorage.removeItem(k)); location.reload(); } };
 }
 function applyTheme() { const t = SET.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); document.documentElement.dataset.theme = t; document.querySelector('meta[name=theme-color]').content = t === 'dark' ? '#141817' : '#f6f4ee'; }
-function setMode(m) { MODE = m; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === m)); history.replaceState(null, '', m === 'daily' ? './' : '#' + m); render(); window.scrollTo(0, 0); }
+function setMode(m) { MODE = m; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === m)); history.replaceState(null, '', m === 'daily' ? './' : '#' + m); render(); window.scrollTo(0, 0); Motion.enter(main); if (m === 'book') Motion.stagger(main, '.bi', 26, 14); }
 $$('#tabs button').forEach(b => b.onclick = () => setMode(b.dataset.m));
 $('#bHelp').onclick = help; $('#bStats').onclick = stats; $('#bSet').onclick = settings;
 
@@ -281,5 +282,6 @@ load().then(() => {
   document.body.appendChild(f);
   if (!localStorage.getItem('sizi.seen')) { localStorage.setItem('sizi.seen', '1'); help(); }
 }).catch(() => { main.innerHTML = '<div class="loading">词典没有加载成功，请刷新重试</div>'; });
+Motion.pills([{ sel: '#tabs' }, { sel: '#mcard .seg', keep: true }]);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
