@@ -12,7 +12,7 @@ const TONES = ['', 'ˉ', 'ˊ', 'ˇ', 'ˋ'];
 const ld = (k, d) => { try { return Object.assign(d, JSON.parse(localStorage.getItem(k) || '{}')); } catch { return d; } };
 const sv = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const SET = ld('sizi.set', { theme: '', tier: 'easy', py: 1 });
-const ST = ld('sizi.stats', { played: 0, won: 0, streak: 0, best: 0, last: -1, dist: {}, free: { played: 0, won: 0 }, book: {}, hintsUsed: 0 });
+const ST = ld('sizi.stats', { played: 0, won: 0, streak: 0, best: 0, last: -1, dist: {}, free: { played: 0, won: 0 }, book: {}, hintsUsed: 0, chainBest: 0, quiz: { n: 0, ok: 0 } });
 let DAILY = ld('sizi.daily', {});
 let FREE = ld('sizi.free', {});
 
@@ -95,6 +95,8 @@ const saveGame = () => sv(MODE === 'daily' ? 'sizi.daily' : 'sizi.free', MODE ==
 
 function render(anim) {
   if (MODE === 'book') return renderBook();
+  if (MODE === 'chain') return renderChain();
+  if (MODE === 'quiz') return renderQuiz();
   cur = getGame();
   const A = cur.ans;
   const rows = [];
@@ -220,11 +222,130 @@ function share() {
   (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('已复制，可以粘贴给朋友'), () => { prompt('复制下面的内容', txt); });
 }
 
+
+/* chain & quiz */
+let CH = null, QZ = null;
+function four(w) { return w && w.length === 4 && DICT[w]; }
+function startChain(seed) {
+  const start = seed || ANS[Math.floor(Math.random() * Math.min(1500, ANS.length))].w;
+  CH = { list: [start], input: '', fail: null };
+}
+function renderChain() {
+  if (!CH) startChain();
+  const last = CH.list[CH.list.length - 1];
+  const need = last[3];
+  main.innerHTML = `<div class="meta"><span>成语接龙 · 用「<b>${esc(need)}</b>」起头</span><span class="pill">已接 ${CH.list.length - 1} 个 · 纪录 ${ST.chainBest || 0}</span></div>
+    <div class="chain">${CH.list.map((w,i)=>`<span class="cw ${i===CH.list.length-1?'on':''}">${esc(w)}</span>`).join('<i>→</i>')}</div>
+    ${CH.fail ? `<div class="hint" style="color:var(--bad,#b23a2e)">${esc(CH.fail)}</div>` : ''}
+    <div class="inbox"><div class="sugg" id="sugg" hidden></div>
+      <div class="inrow"><input id="inp" placeholder="${need}…  或以拼音首字母检索" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button class="go" id="go">接</button></div></div>
+    <div class="tools"><button class="tb" id="cHint">提示一个</button><button class="tb" id="cRestart">重新开局</button></div>
+    <p class="muted" style="text-align:center;color:var(--ink3);font-size:13px;margin:16px 8px">下一个成语须以「${esc(need)}」开头，且不能重复已用过的词。</p>`;
+  const inp = $('#inp'); inp.focus();
+  const sg = $('#sugg'); let items = [], sel = -1;
+  const showS = () => {
+    const q = inp.value.trim().toLowerCase();
+    if (!q) { sg.hidden = true; items = []; return; }
+    const han = /[\u4e00-\u9fff]/.test(q);
+    items = [];
+    if (han) {
+      if (four(q) && q[0]===need) items.push(q);
+    } else {
+      for (const [w, ab] of ABBR) {
+        if (w[0] !== need) continue;
+        if (ab.startsWith(q) || w.startsWith(q)) items.push(w);
+        if (items.length >= 8) break;
+      }
+    }
+    sg.hidden = !items.length;
+    sg.innerHTML = items.map((w,i)=>`<button class="${i===sel?'on':''}" data-w="${w}">${w} <small>${esc(pinyinOf(w))}</small></button>`).join('');
+    $$('#sugg button').forEach(b => b.onclick = () => { inp.value = b.dataset.w; sg.hidden = true; submitChain(); });
+  };
+  inp.oninput = showS;
+  inp.onkeydown = e => { if (e.key==='Enter') { e.preventDefault(); if (sel>=0 && items[sel]) inp.value = items[sel]; submitChain(); } };
+  $('#go').onclick = submitChain;
+  $('#cRestart').onclick = () => { startChain(); renderChain(); };
+  $('#cHint').onclick = () => {
+    const used = new Set(CH.list);
+    const hit = ANS.find(a => a.w[0]===need && !used.has(a.w));
+    toast(hit ? `可接「${hit.w}」` : '这一轮里暂时想不到常用接法，换一个试试');
+  };
+}
+function submitChain() {
+  const w = ($('#inp')?.value || '').trim();
+  const last = CH.list[CH.list.length-1], need = last[3];
+  if (!four(w)) { CH.fail = '请输入词典里的四字成语'; renderChain(); return; }
+  if (w[0] !== need) { CH.fail = `要以「${need}」开头`; renderChain(); return; }
+  if (CH.list.includes(w)) { CH.fail = '这个成语已经用过了'; renderChain(); return; }
+  CH.list.push(w); CH.fail = null;
+  const n = CH.list.length - 1;
+  if (n > (ST.chainBest||0)) { ST.chainBest = n; sv('sizi.stats', ST); toast('刷新了接龙纪录：'+n+' 个'); }
+  else toast('接上了 · 已接 '+n+' 个');
+  renderChain();
+}
+
+function buildQuiz() {
+  const pool = ANS.filter(a => (a.s && a.s.length) || (a.o && a.o.length)).slice(0, 2000);
+  const a = pool[Math.floor(Math.random()*pool.length)];
+  const kind = (a.s && a.s.length && Math.random() < .55) ? 'near' : (a.o && a.o.length ? 'anti' : 'near');
+  const rel = (kind==='near' ? a.s : a.o).filter(w => w.length===4);
+  const other = rel[0] && DICT[rel[0]] ? rel[0] : null;
+  let opts, prompt, ans;
+  if (other) {
+    prompt = kind==='near' ? `与「${a.w}」意思最接近的是？` : `与「${a.w}」意思相反的是？`;
+    const distract = [];
+    for (const x of ANS) { if (x.w!==a.w && x.w!==other && x.w.length===4) distract.push(x.w); if (distract.length>80) break; }
+    const d1 = distract[Math.floor(Math.random()*distract.length)];
+    let d2 = d1; while (d2===d1) d2 = distract[Math.floor(Math.random()*distract.length)];
+    opts = [other, d1, d2].sort(()=>Math.random()-0.5);
+    ans = other;
+  } else {
+    const b = ANS[Math.floor(Math.random()*Math.min(1500,ANS.length))];
+    prompt = `「${a.w}」的释义是哪一项？`;
+    opts = [a.e, b.e].sort(()=>Math.random()-0.5);
+    ans = a.e;
+    return { prompt, stem: a, opts, ans, kind: 'mean' };
+  }
+  return { prompt, stem: a, opts, ans, kind };
+}
+function renderQuiz() {
+  if (!QZ) QZ = { i: 0, ok: 0, q: buildQuiz(), locked: false };
+  const q = QZ.q, a = q.stem;
+  main.innerHTML = `<div class="meta"><span>易错成语辨析 · 第 ${QZ.i+1} 题</span><span class="pill">答对 ${QZ.ok} / ${QZ.i}　累计 ${ST.quiz.ok}/${ST.quiz.n}</span></div>
+    <div class="qcard">
+      <div class="qh">${esc(a.w)}</div>
+      <div class="qp">${esc(pinyinOf(a.w))}</div>
+      <p class="qe">${q.kind==='mean' ? '选出正确释义' : esc(a.e)}</p>
+      <h3 style="font-size:16px;margin:18px 0 10px">${esc(q.prompt)}</h3>
+      <div class="qopts">${q.opts.map((o,i)=>`<button class="qo" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>
+      <div id="qexp" class="qexp" hidden></div>
+      <div class="ract" style="margin-top:16px"><button class="btn pri" id="qNext" hidden>下一题</button></div>
+    </div>`;
+  $$('.qo').forEach(b => b.onclick = () => {
+    if (QZ.locked) return; QZ.locked = true;
+    const ok = b.dataset.v === q.ans;
+    QZ.i++; if (ok) QZ.ok++;
+    ST.quiz.n++; if (ok) ST.quiz.ok++; sv('sizi.stats', ST);
+    $$('.qo').forEach(x => { x.disabled = true; if (x.dataset.v===q.ans) x.classList.add('ok'); else if (x===b) x.classList.add('bad'); });
+    const exp = $('#qexp'); exp.hidden = false;
+    exp.innerHTML = ok ? '选对了。' : `正确答案是「${esc(q.ans)}」。` + (a.d ? `<div style="margin-top:8px;color:var(--ink3)">出处：${esc(a.d)}</div>` : '');
+    $('#qNext').hidden = false;
+  });
+  $('#qNext').onclick = () => { QZ.q = buildQuiz(); QZ.locked = false; renderQuiz(); };
+}
+
+function todayWord() {
+  const d = dayNo();
+  return ANS[(dailyIndex(d) + 17) % Math.min(1500, ANS.length)];
+}
+
 /* book */
 function renderBook(q = '') {
   const ws = Object.entries(ST.book).sort((a, b) => b[1] - a[1]).map(([w]) => w).filter(w => ANSMAP.has(w));
   const list = q ? ws.filter(w => w.includes(q) || ANS[ANSMAP.get(w)].e.includes(q)) : ws;
-  main.innerHTML = `<div class="book-h"><div><b style="font-size:18px">成语集</b><div style="font-size:13px;color:var(--ink3)">已收集 ${ws.length} 个 · 猜中即收入</div></div><input id="bq" placeholder="搜索" value="${esc(q)}"></div>
+  const tw = todayWord();
+  main.innerHTML = `<div class="todayw"><div class="tw-k">今日一词 · 与每日谜题不是同一个</div><b>${esc(tw.w)}</b><div class="tw-p">${esc(pinyinOf(tw.w))}</div><p>${esc(tw.e)}</p>${tw.d?`<div class="tw-d">${esc(tw.d)}</div>`:''}</div>
+  <div class="book-h"><div><b style="font-size:18px">成语集</b><div style="font-size:13px;color:var(--ink3)">已收集 ${ws.length} 个 · 猜中即收入</div></div><input id="bq" placeholder="搜索" value="${esc(q)}"></div>
   ${list.length ? `<div class="blist">${list.map(w => { const a = ANS[ANSMAP.get(w)]; return `<button class="bi" data-w="${w}"><b>${w}</b><span>${esc(pinyinOf(w))}</span><p>${esc(a.e)}</p></button>`; }).join('')}</div>` : `<div class="empty"><div class="lg"><i></i><i></i><i></i><i></i></div>${ws.length ? '没有匹配的成语' : '还没有收集到成语<br>猜中的成语会连同释义、出处一起收进这里'}</div>`}`;
   $('#bq').oninput = e => { const p = e.target.selectionStart; renderBook(e.target.value.trim()); const i = $('#bq'); i.focus(); i.setSelectionRange(p, p); };
   $$('.bi').forEach(b => b.onclick = () => { const a = ANS[ANSMAP.get(b.dataset.w)]; const save = cur; cur = { ans: a.w, guesses: [], won: true }; const h = resultHTML().replace(/<div class="ract">[\s\S]*$/, '</div>').replace(/<span class="verdict[^>]*>.*?<\/span>/, ''); cur = save; modal(h.replace('class="result"', 'class="result" style="border:none;box-shadow:none;padding:0;margin:0"')); });
@@ -251,7 +372,7 @@ function stats() {
   <div class="sgrid"><div><b>${ST.played}</b><span>参与</span></div><div><b>${pct}</b><span>胜率 %</span></div><div><b>${ST.streak}</b><span>连胜</span></div><div><b>${ST.best}</b><span>最长连胜</span></div></div>
   <h3 style="font-size:15px">猜中所用次数</h3>
   <div class="dist">${Array.from({ length: MAX }, (_, i) => i + 1).map(i => { const v = ST.dist[i] || 0; const cw = MODE === 'daily' && DAILY.won && DAILY.guesses.length === i; return `<div><i>${i}</i><em class="${cw ? 'cur' : ''}" style="width:${Math.max(7, v / max * 100)}%">${v}</em></div>`; }).join('')}</div>
-  <p style="font-size:13px;color:var(--ink3);margin-top:18px" class="sfree">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 成语集 ${Object.keys(ST.book).length} 个</p>`);
+  <p style="font-size:13px;color:var(--ink3);margin-top:18px" class="sfree">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 接龙纪录 ${ST.chainBest||0} · 辨析 ${ST.quiz.ok}/${ST.quiz.n} · 成语集 ${Object.keys(ST.book).length} 个</p>`);
   Motion.countUp($('#mcard'), '.sgrid b', 600);
 }
 function settings() {
@@ -267,14 +388,14 @@ function settings() {
   $('#reset').onclick = () => { if (confirm('确定清除全部记录？')) { ['sizi.stats', 'sizi.daily', 'sizi.free'].forEach(k => localStorage.removeItem(k)); location.reload(); } };
 }
 function applyTheme() { const t = SET.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); document.documentElement.dataset.theme = t; document.querySelector('meta[name=theme-color]').content = t === 'dark' ? '#141817' : '#f6f4ee'; }
-function setMode(m) { MODE = m; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === m)); history.replaceState(null, '', m === 'daily' ? './' : '#' + m); render(); window.scrollTo(0, 0); Motion.enter(main); if (m === 'book') Motion.stagger(main, '.bi', 26, 14); }
+function setMode(m) { MODE = m; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === m)); history.replaceState(null, '', m === 'daily' ? './' : '#' + m); render(); window.scrollTo(0, 0); Motion.enter(main); if (m === 'book') Motion.stagger(main, '.bi, .todayw', 26, 14); if (m === 'quiz') Motion.stagger(main, '.qo', 40, 8); if (m === 'chain') Motion.stagger(main, '.cw', 24, 10); }
 $$('#tabs button').forEach(b => b.onclick = () => setMode(b.dataset.m));
 $('#bHelp').onclick = help; $('#bStats').onclick = stats; $('#bSet').onclick = settings;
 
 applyTheme();
 main.innerHTML = '<div class="loading">正在翻词典…</div>';
 load().then(() => {
-  const h = location.hash.slice(1); if (['free', 'book'].includes(h)) MODE = h;
+  const h = location.hash.slice(1); if (['free', 'book', 'chain', 'quiz'].includes(h)) MODE = h;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === MODE));
   render();
   const f = document.createElement('footer'); f.className = 'foot';
