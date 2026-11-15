@@ -12,7 +12,8 @@ const TONES = ['', 'ˉ', 'ˊ', 'ˇ', 'ˋ'];
 const ld = (k, d) => { try { return Object.assign(d, JSON.parse(localStorage.getItem(k) || '{}')); } catch { return d; } };
 const sv = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const SET = ld('sizi.set', { theme: '', tier: 'easy', py: 1 });
-const ST = ld('sizi.stats', { played: 0, won: 0, streak: 0, best: 0, last: -1, dist: {}, free: { played: 0, won: 0 }, book: {}, hintsUsed: 0, chainBest: 0, quiz: { n: 0, ok: 0 } });
+const ST = ld('sizi.stats', { played: 0, won: 0, streak: 0, best: 0, last: -1, dist: {}, free: { played: 0, won: 0 }, book: {}, hintsUsed: 0, chainBest: 0, quiz: { n: 0, ok: 0 }, wrong: [] });
+ST.wrong = ST.wrong || [];
 let DAILY = ld('sizi.daily', {});
 let FREE = ld('sizi.free', {});
 
@@ -97,6 +98,7 @@ function render(anim) {
   if (MODE === 'book') return renderBook();
   if (MODE === 'chain') return renderChain();
   if (MODE === 'quiz') return renderQuiz();
+  if (MODE === 'miss') return renderMiss();
   cur = getGame();
   const A = cur.ans;
   const rows = [];
@@ -328,10 +330,46 @@ function renderQuiz() {
     ST.quiz.n++; if (ok) ST.quiz.ok++; sv('sizi.stats', ST);
     $$('.qo').forEach(x => { x.disabled = true; if (x.dataset.v===q.ans) x.classList.add('ok'); else if (x===b) x.classList.add('bad'); });
     const exp = $('#qexp'); exp.hidden = false;
-    exp.innerHTML = ok ? '选对了。' : `正确答案是「${esc(q.ans)}」。` + (a.d ? `<div style="margin-top:8px;color:var(--ink3)">出处：${esc(a.d)}</div>` : '');
+    if (!ok) {
+      const item = { w: a.w, prompt: q.prompt, ans: q.ans, pick: b.dataset.v, kind: q.kind, t: Date.now() };
+      ST.wrong = ST.wrong || [];
+      ST.wrong = ST.wrong.filter(x => !(x.w === item.w && x.prompt === item.prompt));
+      ST.wrong.unshift(item);
+      if (ST.wrong.length > 200) ST.wrong = ST.wrong.slice(0, 200);
+      sv('sizi.stats', ST);
+    } else if (QZ.fromMiss) {
+      ST.wrong = (ST.wrong || []).filter(x => !(x.w === QZ.fromMiss.w && x.prompt === QZ.fromMiss.prompt));
+      sv('sizi.stats', ST);
+    }
+    exp.innerHTML = ok ? (QZ.fromMiss ? '选对了，已从错题本移出。' : '选对了。') : `正确答案是「${esc(q.ans)}」。` + (a.d ? `<div style="margin-top:8px;color:var(--ink3)">出处：${esc(a.d)}</div>` : '') + `<div style="margin-top:8px"><button class="tb" id="toMiss">去错题本</button></div>`;
     $('#qNext').hidden = false;
+    if ($('#toMiss')) $('#toMiss').onclick = () => setMode('miss');
   });
-  $('#qNext').onclick = () => { QZ.q = buildQuiz(); QZ.locked = false; renderQuiz(); };
+  $('#qNext').onclick = () => { QZ.q = buildQuiz(); QZ.locked = false; QZ.fromMiss = null; renderQuiz(); };
+}
+function renderMiss() {
+  const list = ST.wrong || [];
+  main.innerHTML = `<div class="meta"><span>错题本 · 辨析里答错的题</span><span class="pill">${list.length} 道</span></div>
+    ${list.length ? `<div class="mlist">${list.map((x,i) => {
+      const a = ANSMAP && ANSMAP.has(x.w) ? ANS[ANSMAP.get(x.w)] : null;
+      return `<div class="mi" data-i="${i}"><b>${esc(x.w)}</b><p>${esc(x.prompt)}</p><div class="mw">当时选了「${esc(x.pick)}」· 应选「${esc(x.ans)}」</div>${a && a.d ? `<div class="md">出处：${esc(a.d)}</div>` : ''}<div class="ract"><button class="btn pri" data-drill="${i}">再练这道</button><button class="btn" data-del="${i}">移出</button></div></div>`;
+    }).join('')}</div><div class="ract" style="justify-content:center;margin-top:8px"><button class="btn" id="clrMiss">清空错题本</button></div>` : `<div class="empty"><div class="lg"><i></i><i></i><i></i><i></i></div>还没有错题<br>在「辨析」里选错后，会自动收进这里</div>`}`;
+  $$('[data-drill]').forEach(b => b.onclick = () => drillMiss(list[+b.dataset.drill]));
+  $$('[data-del]').forEach(b => b.onclick = () => { ST.wrong.splice(+b.dataset.del, 1); sv('sizi.stats', ST); renderMiss(); });
+  if ($('#clrMiss')) $('#clrMiss').onclick = () => { if (confirm('清空错题本？')) { ST.wrong = []; sv('sizi.stats', ST); renderMiss(); } };
+}
+function drillMiss(item) {
+  const a = ANSMAP && ANSMAP.has(item.w) ? ANS[ANSMAP.get(item.w)] : null;
+  if (!a) { toast('这条成语眼下不在词库里'); return; }
+  const opts = [item.ans, item.pick].filter((v,i,arr) => v && arr.indexOf(v)===i);
+  for (let n=0; n<40 && opts.length<3; n++) {
+    const b = ANS[Math.floor(Math.random()*Math.min(1500,ANS.length))];
+    const cand = item.kind === 'mean' ? b.e : b.w;
+    if (cand && !opts.includes(cand)) opts.push(cand);
+  }
+  opts.sort(() => Math.random()-0.5);
+  QZ = { i: 0, ok: 0, q: { prompt: item.prompt, stem: a, opts, ans: item.ans, kind: item.kind || 'mean' }, locked: false, fromMiss: item };
+  setMode('quiz');
 }
 
 function todayWord() {
@@ -344,11 +382,23 @@ function renderBook(q = '') {
   const ws = Object.entries(ST.book).sort((a, b) => b[1] - a[1]).map(([w]) => w).filter(w => ANSMAP.has(w));
   const list = q ? ws.filter(w => w.includes(q) || ANS[ANSMAP.get(w)].e.includes(q)) : ws;
   const tw = todayWord();
-  main.innerHTML = `<div class="todayw"><div class="tw-k">今日一词 · 与每日谜题不是同一个</div><b>${esc(tw.w)}</b><div class="tw-p">${esc(pinyinOf(tw.w))}</div><p>${esc(tw.e)}</p>${tw.d?`<div class="tw-d">${esc(tw.d)}</div>`:''}</div>
-  <div class="book-h"><div><b style="font-size:18px">成语集</b><div style="font-size:13px;color:var(--ink3)">已收集 ${ws.length} 个 · 猜中即收入</div></div><input id="bq" placeholder="搜索" value="${esc(q)}"></div>
-  ${list.length ? `<div class="blist">${list.map(w => { const a = ANS[ANSMAP.get(w)]; return `<button class="bi" data-w="${w}"><b>${w}</b><span>${esc(pinyinOf(w))}</span><p>${esc(a.e)}</p></button>`; }).join('')}</div>` : `<div class="empty"><div class="lg"><i></i><i></i><i></i><i></i></div>${ws.length ? '没有匹配的成语' : '还没有收集到成语<br>猜中的成语会连同释义、出处一起收进这里'}</div>`}`;
-  $('#bq').oninput = e => { const p = e.target.selectionStart; renderBook(e.target.value.trim()); const i = $('#bq'); i.focus(); i.setSelectionRange(p, p); };
-  $$('.bi').forEach(b => b.onclick = () => { const a = ANS[ANSMAP.get(b.dataset.w)]; const save = cur; cur = { ans: a.w, guesses: [], won: true }; const h = resultHTML().replace(/<div class="ract">[\s\S]*$/, '</div>').replace(/<span class="verdict[^>]*>.*?<\/span>/, ''); cur = save; modal(h.replace('class="result"', 'class="result" style="border:none;box-shadow:none;padding:0;margin:0"')); });
+  const bk = renderBook._bk || 'mine';
+  const tales = () => ANS.filter(a => a.t && (!q || a.w.includes(q) || (a.t + a.e + (a.d || '')).includes(q)));
+  const talesN = ANS.filter(a => a.t).length;
+  main.innerHTML = `<div class="todayw"><div class="tw-k">今日一词 · 与每日谜题不是同一个</div><b>${esc(tw.w)}</b><div class="tw-p">${esc(pinyinOf(tw.w))}</div><p>${esc(tw.e)}</p>${tw.d?`<div class="tw-d">出处：${esc(tw.d)}</div>`:''}${tw.t?`<div class="tw-t">${esc(tw.t)}</div>`:''}</div>
+  <div class="book-h"><div><b style="font-size:18px">成语集</b><div style="font-size:13px;color:var(--ink3)">${bk==='tale' ? `词库里有典故的 ${talesN} 条` : `已收集 ${ws.length} 个 · 猜中即收入`}</div></div><input id="bq" placeholder="搜索" value="${esc(q)}"></div>
+  <div class="seg bkseg" id="bkseg"><button data-bk="mine" class="${bk==='mine'?'on':''}">我的收集</button><button data-bk="tale" class="${bk==='tale'?'on':''}">成语故事</button></div>
+  ${bk==='tale' ? (tales().length ? `<div class="blist">${tales().slice(0,80).map(a => `<button class="bi" data-w="${a.w}"><b>${a.w}</b><span>${esc(pinyinOf(a.w))}</span><p>${esc(a.t)}</p></button>`).join('')}</div>${tales().length>80?`<p class="empty">只先列出 80 条，可用搜索缩小范围。</p>`:''}` : `<div class="empty">没有找到带典故的成语</div>`)
+    : (list.length ? `<div class="blist">${list.map(w => { const a = ANS[ANSMAP.get(w)]; return `<button class="bi" data-w="${w}"><b>${w}</b><span>${esc(pinyinOf(w))}</span><p>${esc(a.e)}</p></button>`; }).join('')}</div>` : `<div class="empty"><div class="lg"><i></i><i></i><i></i><i></i></div>${ws.length ? '没有匹配的成语' : '还没有收集到成语<br>猜中的成语会连同释义、出处一起收进这里'}</div>`)}`;
+  $('#bq').oninput = e => { const pos = e.target.selectionStart; renderBook(e.target.value.trim()); const i = $('#bq'); i.focus(); i.setSelectionRange(pos, pos); };
+  $$('#bkseg button').forEach(b => b.onclick = () => { renderBook._bk = b.dataset.bk; renderBook(q); });
+  $$('.bi').forEach(b => b.onclick = () => showIdiom(b.dataset.w));
+}
+function showIdiom(w) {
+  const a = ANS[ANSMAP.get(w)]; if (!a) return;
+  const sec = (k, v) => v ? `<div class="sec"><div class="sk">${k}</div><p>${esc(v)}</p></div>` : '';
+  modal(`<div class="help tale"><h3>${esc(a.w)}</h3><div class="qp" style="text-align:left;margin:0 0 12px">${esc(pinyinOf(a.w))}</div>
+    ${sec('释义', a.e)}${sec('出处', a.d)}${sec('典故', a.t)}${sec('例句', a.x)}${sec('用法', a.u)}</div>`);
 }
 
 /* modals */
@@ -372,7 +422,7 @@ function stats() {
   <div class="sgrid"><div><b>${ST.played}</b><span>参与</span></div><div><b>${pct}</b><span>胜率 %</span></div><div><b>${ST.streak}</b><span>连胜</span></div><div><b>${ST.best}</b><span>最长连胜</span></div></div>
   <h3 style="font-size:15px">猜中所用次数</h3>
   <div class="dist">${Array.from({ length: MAX }, (_, i) => i + 1).map(i => { const v = ST.dist[i] || 0; const cw = MODE === 'daily' && DAILY.won && DAILY.guesses.length === i; return `<div><i>${i}</i><em class="${cw ? 'cur' : ''}" style="width:${Math.max(7, v / max * 100)}%">${v}</em></div>`; }).join('')}</div>
-  <p style="font-size:13px;color:var(--ink3);margin-top:18px" class="sfree">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 接龙纪录 ${ST.chainBest||0} · 辨析 ${ST.quiz.ok}/${ST.quiz.n} · 成语集 ${Object.keys(ST.book).length} 个</p>`);
+  <p style="font-size:13px;color:var(--ink3);margin-top:18px" class="sfree">自由练习：${ST.free.played} 题，猜中 ${ST.free.won} 题 · 接龙纪录 ${ST.chainBest||0} · 辨析 ${ST.quiz.ok}/${ST.quiz.n} · 成语集 ${Object.keys(ST.book).length} 个 · 错题 ${(ST.wrong||[]).length} 道</p>`);
   Motion.countUp($('#mcard'), '.sgrid b', 600);
 }
 function settings() {
@@ -395,7 +445,7 @@ $('#bHelp').onclick = help; $('#bStats').onclick = stats; $('#bSet').onclick = s
 applyTheme();
 main.innerHTML = '<div class="loading">正在翻词典…</div>';
 load().then(() => {
-  const h = location.hash.slice(1); if (['free', 'book', 'chain', 'quiz'].includes(h)) MODE = h;
+  const h = location.hash.slice(1); if (['free', 'book', 'chain', 'quiz', 'miss'].includes(h)) MODE = h;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.m === MODE));
   render();
   const f = document.createElement('footer'); f.className = 'foot';
